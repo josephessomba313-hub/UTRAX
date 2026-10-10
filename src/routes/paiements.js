@@ -64,7 +64,7 @@ router.post('/ecole', verifierEcole, limiteCodeAgence('paiement'), async (req, r
     const anneeId = Number(annees[0].id)
 
     const [eleves] = await conn.query(
-      `SELECT e.id, c.frais_fcfa AS frais
+      `SELECT e.id, e.actif, c.frais_fcfa AS frais
        FROM eleves e JOIN classes c ON c.id = e.classe_id
        WHERE e.id = ? AND e.ecole_id = ?
        FOR UPDATE OF e`,
@@ -73,6 +73,10 @@ router.post('/ecole', verifierEcole, limiteCodeAgence('paiement'), async (req, r
     if (eleves.length === 0) {
       await conn.rollback()
       return res.status(404).json({ erreur: 'Élève introuvable dans cet établissement.' })
+    }
+    if (!eleves[0].actif) {
+      await conn.rollback()
+      return res.status(409).json({ erreur: "Cet élève est archivé : son impayé a été enregistré comme arriéré, à régler directement auprès de l'établissement. Réintégrez-le d'abord si l'archivage était une erreur." })
     }
     const [[{ deja_paye }]] = await conn.query(
       'SELECT COALESCE(SUM(montant_fcfa), 0) AS deja_paye FROM paiements WHERE eleve_id = ? AND annee_id = ? AND annule = FALSE',

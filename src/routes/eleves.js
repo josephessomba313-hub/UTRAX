@@ -153,25 +153,98 @@ router.post('/', verifierEcole, async (req, res) => {
 // ce motif suit l'élève partout via son identifiant UTRAX. Réintégrer un élève efface le motif.
 router.patch('/:id/statut', verifierEcole, async (req, res) => {
   const { actif } = req.body
-  if (actif) {
-    const [reintegre] = await pool.query(
-      'UPDATE eleves SET actif = TRUE, motif_sortie = NULL, commentaire_sortie = NULL, sortie_le = NULL WHERE id = ? AND ecole_id = ?',
+  let motif = null
+  let commentaire = null
+  if (!actif) {
+    motif = String(req.body.motif || '').trim()
+    if (!MOTIFS_SORTIE.includes(motif)) {
+      return res.status(400).json({ erreur: `Motif requis pour archiver un élève : ${MOTIFS_SORTIE.join(', ')}.` })
+    }
+    commentaire = String(req.body.commentaire || '').trim().slice(0, 500) || null
+  }
+
+  const conn = await pool.getConnection()
+  try {
+    await conn.beginTransaction()
+    // Verrou partagé sur l'année active (pas de bascule d'année pendant l'opération), puis verrou
+    // sur l'élève (pas de paiement en même temps : le calcul du reste dû reste exact).
+    const [annees] = await conn.query('SELECT id FROM annees_scolaires WHERE active = TRUE LIMIT 1 FOR SHARE')
+    if (annees.length === 0) {
+      await conn.rollback()
+      return res.status(500).json({ erreur: 'Aucune année scolaire active.' })
+    }
+    const anneeId = Number(annees[0].id)
+    const [eleves] = await conn.query(
+      `SELECT e.id, e.identifiant_utrax, e.nom, c.nom AS classe, c.frais_fcfa AS frais
+       FROM eleves e JOIN classes c ON c.id = e.classe_id
+       WHERE e.id = ? AND e.ecole_id = ?
+       FOR UPDATE OF e`,
       [req.params.id, req.ecoleId]
     )
-    if (reintegre.affectedRows === 0) return res.status(404).json({ erreur: 'Élève introuvable dans cet établissement.' })
-    return res.json({ ok: true })
+    if (eleves.length === 0) {
+      await conn.rollback()
+      return res.status(404).json({ erreur: 'Élève introuvable dans cet établissement.' })
+    }
+    const eleve = eleves[0]
+
+    if (actif) {
+      await conn.query(
+        'UPDATE eleves SET actif = TRUE, motif_sortie = NULL, commentaire_sortie = NULL, sortie_le = NULL WHERE id = ?',
+        [eleve.id]
+      )
+      // L'arriéré créé à l'archivage n'a plus lieu d'être : l'élève est de nouveau compté normalement.
+      // (Un arriéré déjà soldé par UTRAX, ou celui d'une année précédente, n'est pas touché.)
+      await conn.query(
+        'DELETE FROM arrieres WHERE annee_id = ? AND eleve_id = ? AND ecole_id = ? AND solde = FALSE',
+        [anneeId, eleve.id, req.ecoleId]
+      )
+      await conn.commit()
+      return res.json({ ok: true })
+    }
+
+    await conn.query(
+      'UPDATE eleves SET actif = FALSE, motif_sortie = ?, commentaire_sortie = ?, sortie_le = CURDATE() WHERE id = ?',
+      [motif, commentaire, eleve.id]
+    )
+
+    // Un élève qui quitte l'établissement avec une scolarité impayée laisse un arriéré, rattaché à son
+    // identifiant UTRAX : il apparaît dans la fiche du parent et dans la vérification faite par une
+    // nouvelle école (sans jamais bloquer l'inscription).
+    const [[{ paye }]] = await conn.query(
+      'SELECT COALESCE(SUM(montant_fcfa), 0) AS paye FROM paiements WHERE eleve_id = ? AND annee_id = ? AND annule = FALSE',
+      [eleve.id, anneeId]
+    )
+    const reste = Number(eleve.frais) - Number(paye)
+    const [existant] = await conn.query(
+      'SELECT id, solde FROM arrieres WHERE annee_id = ? AND identifiant_utrax = ? AND ecole_id = ? FOR UPDATE',
+      [anneeId, eleve.identifiant_utrax, req.ecoleId]
+    )
+    let arriere = 0
+    if (reste > 0) {
+      if (existant.length === 0) {
+        await conn.query(
+          `INSERT INTO arrieres (identifiant_utrax, ecole_id, eleve_id, nom_eleve, classe, annee_id, montant_fcfa, cree_le)
+           VALUES (?, ?, ?, ?, ?, ?, ?, CURDATE())`,
+          [eleve.identifiant_utrax, req.ecoleId, eleve.id, eleve.nom, eleve.classe, anneeId, reste]
+        )
+        arriere = reste
+      } else if (!existant[0].solde) {
+        await conn.query('UPDATE arrieres SET montant_fcfa = ?, eleve_id = ?, nom_eleve = ?, classe = ? WHERE id = ?',
+          [reste, eleve.id, eleve.nom, eleve.classe, existant[0].id])
+        arriere = reste
+      }
+    } else if (existant.length > 0 && !existant[0].solde) {
+      await conn.query('DELETE FROM arrieres WHERE id = ?', [existant[0].id]) // soldé entre-temps : plus de dette
+    }
+    await conn.commit()
+    res.json({ ok: true, arriere })
+  } catch (err) {
+    await conn.rollback().catch(() => {})
+    console.error(err)
+    res.status(500).json({ erreur: 'Échec du changement de statut.' })
+  } finally {
+    conn.release()
   }
-  const motif = String(req.body.motif || '').trim()
-  if (!MOTIFS_SORTIE.includes(motif)) {
-    return res.status(400).json({ erreur: `Motif requis pour archiver un élève : ${MOTIFS_SORTIE.join(', ')}.` })
-  }
-  const commentaire = String(req.body.commentaire || '').trim().slice(0, 500) || null
-  const [archive] = await pool.query(
-    'UPDATE eleves SET actif = FALSE, motif_sortie = ?, commentaire_sortie = ?, sortie_le = CURDATE() WHERE id = ? AND ecole_id = ?',
-    [motif, commentaire, req.params.id, req.ecoleId]
-  )
-  if (archive.affectedRows === 0) return res.status(404).json({ erreur: 'Élève introuvable dans cet établissement.' })
-  res.json({ ok: true })
 })
 
 // CÔTÉ ÉCOLE — la rentrée est-elle à faire ? (une seule fois par année, après l'ouverture par UTRAX)

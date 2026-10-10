@@ -80,9 +80,10 @@ router.post('/ouvrir', verifierAdmin, async (req, res) => {
        JOIN classes c ON c.id = e.classe_id
        LEFT JOIN paiements p ON p.eleve_id = e.id AND p.annee_id = ? AND p.annule = FALSE
        WHERE e.actif = TRUE
+         AND NOT EXISTS (SELECT 1 FROM arrieres a WHERE a.annee_id = ? AND a.identifiant_utrax = e.identifiant_utrax AND a.ecole_id = e.ecole_id)
        GROUP BY e.id, e.identifiant_utrax, e.ecole_id, e.nom, c.nom, c.frais_fcfa
        HAVING reste > 0`,
-      [active.id, active.id]
+      [active.id, active.id, active.id]
     )
     await conn.query('UPDATE annees_scolaires SET active = FALSE, cloturee_le = CURDATE() WHERE id = ?', [active.id])
     await conn.query('INSERT INTO annees_scolaires (libelle, active, ouverte_le) VALUES (?, TRUE, CURDATE())', [nouveau])
