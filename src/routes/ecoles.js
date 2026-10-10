@@ -98,7 +98,8 @@ router.post('/', verifierAdmin, async (req, res) => {
         return res.status(409).json({ erreur: `Le code « ${code.trim().toUpperCase()} » est déjà utilisé par un autre établissement.` })
       }
     }
-    res.status(500).json({ erreur: 'Échec de la création.', details: err.message })
+    console.error(err)
+    res.status(500).json({ erreur: 'Échec de la création.' })
   } finally {
     conn.release()
   }

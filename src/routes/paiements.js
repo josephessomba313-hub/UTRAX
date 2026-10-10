@@ -5,6 +5,10 @@ import { verifierEcole } from '../middleware/auth-ecole.js'
 import { verifierAdmin } from '../middleware/auth-admin.js'
 import { anneeActive } from '../annee.js'
 import { insererAvecReference } from '../reference.js'
+import { limiteEssais } from '../middleware/limite-essais.js'
+
+// Le code de confirmation de l'agence est court : on limite les essais ratés par établissement.
+const limiteCodeAgence = (nom) => limiteEssais({ max: 8, cle: (req) => `${nom}:${req.ecoleId}` })
 
 const router = Router()
 
@@ -28,7 +32,7 @@ router.get('/recents', verifierAdmin, async (req, res) => {
 // si l'école en change plus tard.
 // La vérification du reste dû et l'enregistrement se font dans une transaction qui verrouille
 // l'élève : deux paiements simultanés ne peuvent plus dépasser ensemble les frais annuels.
-router.post('/ecole', verifierEcole, async (req, res) => {
+router.post('/ecole', verifierEcole, limiteCodeAgence('paiement'), async (req, res) => {
   const { eleveId, montant, codeAgence } = req.body
   if (!eleveId || !montant || !codeAgence) return res.status(400).json({ erreur: 'eleveId, montant et codeAgence requis.' })
   const montantNum = Number(montant)
@@ -113,7 +117,7 @@ router.post('/parent', (req, res) => {
 // compté dans les soldes, mais reste visible dans l'historique pour la traçabilité.
 // Un paiement déjà inclus dans un virement vers l'école ne peut plus être annulé ici : l'ajustement
 // du prochain virement passe par UTRAX.
-router.patch('/:id/annuler', verifierEcole, async (req, res) => {
+router.patch('/:id/annuler', verifierEcole, limiteCodeAgence('annulation'), async (req, res) => {
   const motif = String(req.body.motif || '').trim()
   const codeAgence = String(req.body.codeAgence || '').trim()
   if (!motif) return res.status(400).json({ erreur: 'Un motif est requis pour annuler un paiement.' })

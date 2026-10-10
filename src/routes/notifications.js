@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { pool } from '../db.js'
 import { verifierEcole } from '../middleware/auth-ecole.js'
+import { verifierFiche } from '../middleware/auth-fiche.js'
 
 const router = Router()
 
@@ -10,16 +11,13 @@ router.post('/', verifierEcole, async (req, res) => {
   const message = String(req.body.message || '').trim()
   const titre = String(req.body.titre || '').trim() || null
   if (!message) return res.status(400).json({ erreur: 'Message requis.' })
-  const [eleves] = await pool.query('SELECT id FROM eleves WHERE ecole_id = ? AND actif = TRUE', [req.ecoleId])
-  if (eleves.length === 0) return res.json({ nombre: 0 })
-  const messageTronque = message.slice(0, 2000)
-  for (const eleve of eleves) {
-    await pool.query(
-      'INSERT INTO notifications_parent (eleve_id, titre, message, date_envoi) VALUES (?, ?, ?, CURDATE())',
-      [eleve.id, titre, messageTronque]
-    )
-  }
-  res.status(201).json({ nombre: eleves.length })
+  // Un seul INSERT ... SELECT : tout ou rien, au lieu d'une requête par élève.
+  const [result] = await pool.query(
+    `INSERT INTO notifications_parent (eleve_id, titre, message, date_envoi)
+     SELECT id, ?, ?, CURDATE() FROM eleves WHERE ecole_id = ? AND actif = TRUE`,
+    [titre, message.slice(0, 2000), req.ecoleId]
+  )
+  res.status(201).json({ nombre: result.affectedRows })
 })
 
 // CÔTÉ ÉCOLE — envoyer une notification libre au parent d'un élève (réunion, document à
@@ -49,9 +47,9 @@ router.get('/eleve/:eleveId', verifierEcole, async (req, res) => {
   res.json(rows)
 })
 
-// CÔTÉ PARENT — mêmes notifications, en lecture seule, sans mot de passe : même niveau d'accès
-// que la fiche publique (déjà fallu connaître école + classe + matricule pour obtenir cet id).
-router.get('/eleve/:eleveId/public', async (req, res) => {
+// CÔTÉ PARENT — mêmes notifications, en lecture seule. Exige le jeton remis avec la fiche de cet
+// élève (code établissement + classe + matricule) : le numéro interne ne suffit plus.
+router.get('/eleve/:eleveId/public', verifierFiche, async (req, res) => {
   const [rows] = await pool.query(
     'SELECT titre, message, date_envoi AS date FROM notifications_parent WHERE eleve_id = ? ORDER BY date_envoi DESC',
     [req.params.eleveId]

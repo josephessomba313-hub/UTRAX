@@ -4,6 +4,7 @@ import { pool } from '../db.js'
 import { anneeActive } from '../annee.js'
 import { verifierEcole } from '../middleware/auth-ecole.js'
 import { limiteEssais } from '../middleware/limite-essais.js'
+import { signerFiche, verifierFicheOuEcole } from '../middleware/auth-fiche.js'
 
 const router = Router()
 
@@ -77,7 +78,7 @@ router.get('/', verifierEcole, async (req, res) => {
 
 // CÔTÉ ÉCOLE — consulter le passé d'un élève par son identifiant UTRAX AVANT de l'inscrire
 // (exclusions, arriérés, inscription active ailleurs). Le nom doit correspondre, comme à l'inscription.
-router.get('/identifiant/:id/antecedents', verifierEcole, async (req, res) => {
+router.get('/identifiant/:id/antecedents', verifierEcole, limiteEssais({ max: 20, cle: (req) => `antecedents:${req.ecoleId}` }), async (req, res) => {
   const identifiant = req.params.id.trim().toUpperCase()
   const nomAttendu = String(req.query.nom || '').trim()
   const [existants] = await pool.query('SELECT nom FROM eleves WHERE identifiant_utrax = ?', [identifiant])
@@ -142,7 +143,9 @@ router.post('/', verifierEcole, async (req, res) => {
       inscritActivementAilleurs: passe ? passe.inscritActivementAilleurs : [],
     })
   } catch (err) {
-    res.status(500).json({ erreur: 'Échec de l\u2019inscription.', details: err.message })
+    if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({ erreur: 'Conflit pendant l\u2019inscription (élève déjà inscrit ou matricule déjà pris), réessayez.' })
+    console.error(err)
+    res.status(500).json({ erreur: 'Échec de l\u2019inscription.' })
   }
 })
 
@@ -151,10 +154,11 @@ router.post('/', verifierEcole, async (req, res) => {
 router.patch('/:id/statut', verifierEcole, async (req, res) => {
   const { actif } = req.body
   if (actif) {
-    await pool.query(
+    const [reintegre] = await pool.query(
       'UPDATE eleves SET actif = TRUE, motif_sortie = NULL, commentaire_sortie = NULL, sortie_le = NULL WHERE id = ? AND ecole_id = ?',
       [req.params.id, req.ecoleId]
     )
+    if (reintegre.affectedRows === 0) return res.status(404).json({ erreur: 'Élève introuvable dans cet établissement.' })
     return res.json({ ok: true })
   }
   const motif = String(req.body.motif || '').trim()
@@ -162,10 +166,11 @@ router.patch('/:id/statut', verifierEcole, async (req, res) => {
     return res.status(400).json({ erreur: `Motif requis pour archiver un élève : ${MOTIFS_SORTIE.join(', ')}.` })
   }
   const commentaire = String(req.body.commentaire || '').trim().slice(0, 500) || null
-  await pool.query(
+  const [archive] = await pool.query(
     'UPDATE eleves SET actif = FALSE, motif_sortie = ?, commentaire_sortie = ?, sortie_le = CURDATE() WHERE id = ? AND ecole_id = ?',
     [motif, commentaire, req.params.id, req.ecoleId]
   )
+  if (archive.affectedRows === 0) return res.status(404).json({ erreur: 'Élève introuvable dans cet établissement.' })
   res.json({ ok: true })
 })
 
@@ -244,7 +249,8 @@ router.post('/rentree', verifierEcole, async (req, res) => {
     res.json({ annee: annee.libelle, promus, redoublants: restes, sortis })
   } catch (err) {
     await conn.rollback()
-    res.status(500).json({ erreur: 'Échec de la rentrée.', details: err.message })
+    console.error(err)
+    res.status(500).json({ erreur: 'Échec de la rentrée.' })
   } finally {
     conn.release()
   }
@@ -282,14 +288,20 @@ router.get('/public/fiche', limiteEssais(), async (req, res) => {
      ORDER BY an.id`,
     [rows[0].identifiant_utrax]
   )
-  res.json({ ...rows[0], arrieres })
+  // Le jeton ouvre uniquement les reçus, relances et notifications de CET élève (2 h).
+  res.json({ ...rows[0], arrieres, jeton: signerFiche(rows[0].id) })
 })
 
 // CÔTÉ PARENT — historique des paiements d'un élève (pour la fiche).
 // Par défaut, seule l'année scolaire en cours est renvoyée — un élève promu ou qui redouble ne
 // doit pas voir ses reçus d'années passées mélangés à ceux de l'année en cours. Passer
 // ?toutesAnnees=1 renvoie l'historique complet, chaque reçu indiquant alors son année.
-router.get('/:id/paiements', async (req, res) => {
+router.get('/:id/paiements', verifierFicheOuEcole, async (req, res) => {
+  if (req.ecoleId) {
+    // Une école ne peut consulter que ses propres élèves.
+    const [propres] = await pool.query('SELECT 1 FROM eleves WHERE id = ? AND ecole_id = ?', [req.params.id, req.ecoleId])
+    if (propres.length === 0) return res.status(404).json({ erreur: 'Élève introuvable dans cet établissement.' })
+  }
   const toutesAnnees = req.query.toutesAnnees === '1'
   const annee = await anneeActive()
   const [paiements] = await pool.query(
