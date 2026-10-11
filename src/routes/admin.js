@@ -25,6 +25,15 @@ function cleInstallationValide(fournie) {
   return timingSafeEqual(empreinte(fournie), empreinte(attendue))
 }
 
+// Un mot de passe copié-collé emporte souvent une espace invisible au début ou à la fin. Les mots de
+// passe sont donc enregistrés SANS espace en bordure, et à la connexion on accepte aussi la saisie
+// débarrassée de ses espaces (les anciens comptes continuent de fonctionner tels quels).
+async function motDePasseCorrect(saisi, hash) {
+  if (await bcrypt.compare(saisi, hash)) return true
+  const nettoye = saisi.trim()
+  return nettoye !== saisi && (await bcrypt.compare(nettoye, hash))
+}
+
 async function ouvrirSession(admin, ip) {
   const jti = randomBytes(16).toString('hex')
   // Ménage : on oublie les sessions terminées depuis plus d'une semaine.
@@ -60,7 +69,7 @@ router.post('/premier-compte', limiteEssais({ max: 5 }), async (req, res) => {
   }
   const identifiant = String(req.body.identifiant || '').trim().toLowerCase()
   const nom = String(req.body.nom || '').trim()
-  const motDePasse = String(req.body.motDePasse || '')
+  const motDePasse = String(req.body.motDePasse || '').trim()
   if (!IDENTIFIANT_VALIDE.test(identifiant)) return res.status(400).json({ erreur: 'Identifiant : 3 à 40 caractères (lettres minuscules, chiffres, point, tiret).' })
   if (nom.length < 2 || nom.length > 120) return res.status(400).json({ erreur: 'Nom requis.' })
   if (motDePasse.length < MDP_MIN) return res.status(400).json({ erreur: `Le mot de passe doit contenir au moins ${MDP_MIN} caractères.` })
@@ -92,7 +101,7 @@ router.post('/login', limiteIp, limiteIdentifiant, async (req, res) => {
   if (!identifiant || !motDePasse) return res.status(400).json({ erreur: 'Identifiant et mot de passe requis.' })
 
   const [[admin]] = await pool.query('SELECT * FROM admins WHERE identifiant = ?', [identifiant])
-  const valide = await bcrypt.compare(motDePasse, admin ? admin.mot_de_passe_hash : HASH_FACTICE)
+  const valide = await motDePasseCorrect(motDePasse, admin ? admin.mot_de_passe_hash : HASH_FACTICE)
   if (!admin || !valide || !admin.actif) {
     if (admin) await journaliser(admin.id, admin.identifiant, 'Échec de connexion', 401, req.ip)
     return res.status(401).json({ erreur: 'Identifiant ou mot de passe incorrect.' })
@@ -119,11 +128,11 @@ router.post('/logout-all', verifierAdmin, async (req, res) => {
 
 router.patch('/mot-de-passe', verifierAdmin, limiteEssais({ max: 8, cle: (req) => `mdp-admin:${req.admin.id}` }), async (req, res) => {
   const actuel = String(req.body.motDePasseActuel || '')
-  const nouveau = String(req.body.nouveauMotDePasse || '')
+  const nouveau = String(req.body.nouveauMotDePasse || '').trim()
   if (!actuel || !nouveau) return res.status(400).json({ erreur: 'Mot de passe actuel et nouveau mot de passe requis.' })
   if (nouveau.length < MDP_MIN) return res.status(400).json({ erreur: `Le nouveau mot de passe doit contenir au moins ${MDP_MIN} caractères.` })
   const [[admin]] = await pool.query('SELECT mot_de_passe_hash FROM admins WHERE id = ?', [req.admin.id])
-  if (!(await bcrypt.compare(actuel, admin.mot_de_passe_hash))) return res.status(401).json({ erreur: 'Mot de passe actuel incorrect.' })
+  if (!(await motDePasseCorrect(actuel, admin.mot_de_passe_hash))) return res.status(401).json({ erreur: 'Mot de passe actuel incorrect.' })
   const hash = await bcrypt.hash(nouveau, 10)
   await pool.query('UPDATE admins SET mot_de_passe_hash = ? WHERE id = ?', [hash, req.admin.id])
   // Les autres appareils connectés avec l'ancien mot de passe sont déconnectés.
@@ -143,7 +152,7 @@ router.post('/admins', verifierAdmin, exigerProprietaire, async (req, res) => {
   const identifiant = String(req.body.identifiant || '').trim().toLowerCase()
   const nom = String(req.body.nom || '').trim()
   const role = req.body.role === 'proprietaire' ? 'proprietaire' : 'operateur'
-  const choisi = String(req.body.motDePasse || '')
+  const choisi = String(req.body.motDePasse || '').trim()
   if (!IDENTIFIANT_VALIDE.test(identifiant)) return res.status(400).json({ erreur: 'Identifiant : 3 à 40 caractères (lettres minuscules, chiffres, point, tiret).' })
   if (nom.length < 2 || nom.length > 120) return res.status(400).json({ erreur: 'Nom requis.' })
   if (choisi && choisi.length < MDP_MIN) return res.status(400).json({ erreur: `Le mot de passe doit contenir au moins ${MDP_MIN} caractères.` })
