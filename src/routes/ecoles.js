@@ -9,6 +9,13 @@ import { anneeActive } from '../annee.js'
 
 const router = Router()
 
+// Commission UTRAX par élève actif et par an, appliquée à chaque NOUVEL établissement.
+// Modifiable sans toucher au code : variable COMMISSION_PAR_ELEVE_FCFA sur Railway. Les établissements
+// déjà créés gardent leur propre valeur (modifiable depuis leur fiche, côté UTRAX).
+const COMMISSION_DEFAUT_FCFA = Number.isInteger(Number(process.env.COMMISSION_PAR_ELEVE_FCFA)) && Number(process.env.COMMISSION_PAR_ELEVE_FCFA) >= 0 && process.env.COMMISSION_PAR_ELEVE_FCFA
+  ? Number(process.env.COMMISSION_PAR_ELEVE_FCFA)
+  : 1999
+
 // Liste des écoles — supervision UTRAX
 router.get('/', verifierAdmin, async (req, res) => {
   const [ecoles] = await pool.query(
@@ -73,8 +80,8 @@ router.post('/', verifierAdmin, async (req, res) => {
   try {
     await conn.beginTransaction()
     const [result] = await conn.query(
-      'INSERT INTO ecoles (nom, ville, code, mot_de_passe_hash, agence_bancaire_id) VALUES (?, ?, ?, ?, ?)',
-      [nom, ville, code.trim().toUpperCase(), hash, agenceBancaireId]
+      'INSERT INTO ecoles (nom, ville, code, mot_de_passe_hash, agence_bancaire_id, commission_fcfa) VALUES (?, ?, ?, ?, ?, ?)',
+      [nom, ville, code.trim().toUpperCase(), hash, agenceBancaireId, COMMISSION_DEFAUT_FCFA]
     )
     const ecoleId = result.insertId
     for (const c of classes) {
@@ -110,6 +117,19 @@ router.patch('/:id/statut', verifierAdmin, async (req, res) => {
   const { actif } = req.body
   await pool.query('UPDATE ecoles SET actif = ? WHERE id = ?', [!!actif, req.params.id])
   res.json({ ok: true })
+})
+
+// Changer la commission UTRAX d'une école (FCFA par élève actif et par an) — UTRAX uniquement.
+// Elle s'applique aux PROCHAINS virements : les virements déjà générés gardent leur commission.
+router.patch('/:id/commission', verifierAdmin, async (req, res) => {
+  const commission = Number(req.body.commission)
+  if (!Number.isInteger(commission) || commission < 0 || commission > 1000000) {
+    return res.status(400).json({ erreur: 'La commission doit être un nombre entier de FCFA, entre 0 et 1 000 000.' })
+  }
+  const [ecoles] = await pool.query('SELECT 1 FROM ecoles WHERE id = ?', [req.params.id])
+  if (ecoles.length === 0) return res.status(404).json({ erreur: 'Établissement introuvable.' })
+  await pool.query('UPDATE ecoles SET commission_fcfa = ? WHERE id = ?', [commission, req.params.id])
+  res.json({ ok: true, commission })
 })
 
 // Changer l'agence bancaire d'une école — UTRAX uniquement. Les paiements déjà enregistrés
