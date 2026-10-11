@@ -41,4 +41,12 @@ export async function initialiserTablesAdmin() {
     KEY idx_journal_date (created_at),
     CONSTRAINT fk_journal_admin FOREIGN KEY (admin_id) REFERENCES admins (id) ON DELETE SET NULL
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`)
+
+  // Colonne ajoutée après la création initiale des tables : on l'ajoute si elle manque.
+  const [colonne] = await pool.query(
+    "SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'admins' AND column_name = 'doit_changer_mdp'"
+  )
+  if (colonne.length === 0) {
+    await pool.query('ALTER TABLE admins ADD COLUMN doit_changer_mdp TINYINT(1) NOT NULL DEFAULT 0 AFTER actif')
+  }
 }

@@ -22,13 +22,22 @@ export async function verifierAdmin(req, res, next) {
 
   try {
     const [lignes] = await pool.query(
-      `SELECT a.id, a.identifiant, a.nom, a.role, a.actif
+      `SELECT a.id, a.identifiant, a.nom, a.role, a.actif, a.doit_changer_mdp
        FROM admin_sessions s JOIN admins a ON a.id = s.admin_id
        WHERE s.jti = ? AND s.revoque_le IS NULL AND s.expire_le > NOW()`,
       [payload.jti]
     )
     if (lignes.length === 0 || !lignes[0].actif) return refus('Session UTRAX terminée, reconnectez-vous.')
     req.admin = { ...lignes[0], jti: payload.jti }
+    // Mot de passe provisoire (donné par le propriétaire) : seules la lecture du profil, le changement
+    // de mot de passe et la déconnexion sont permis tant qu'il n'a pas été remplacé.
+    if (lignes[0].doit_changer_mdp) {
+      const chemin = req.originalUrl.split('?')[0]
+      const permis = chemin === '/api/admin/moi' || chemin === '/api/admin/mot-de-passe' || chemin.startsWith('/api/admin/logout')
+      if (!permis) {
+        return res.status(403).json({ erreur: "Choisissez d'abord votre propre mot de passe.", code: 'mdp_a_changer' })
+      }
+    }
   } catch (err) {
     console.error(err)
     return res.status(500).json({ erreur: 'Erreur interne du serveur.' })

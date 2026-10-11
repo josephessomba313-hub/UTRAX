@@ -45,7 +45,7 @@ async function ouvrirSession(admin, ip) {
   return jwt.sign({ type: 'admin', adminId: Number(admin.id), jti }, process.env.JWT_SECRET, { expiresIn: DUREE_SESSION })
 }
 
-const enJson = (a) => ({ id: Number(a.id), identifiant: a.identifiant, nom: a.nom, role: a.role })
+const enJson = (a) => ({ id: Number(a.id), identifiant: a.identifiant, nom: a.nom, role: a.role, doitChangerMotDePasse: !!a.doit_changer_mdp })
 
 function journaliser(adminId, identifiant, action, statut, ip) {
   return pool.query(
@@ -131,10 +131,11 @@ router.patch('/mot-de-passe', verifierAdmin, limiteEssais({ max: 8, cle: (req) =
   const nouveau = String(req.body.nouveauMotDePasse || '').trim()
   if (!actuel || !nouveau) return res.status(400).json({ erreur: 'Mot de passe actuel et nouveau mot de passe requis.' })
   if (nouveau.length < MDP_MIN) return res.status(400).json({ erreur: `Le nouveau mot de passe doit contenir au moins ${MDP_MIN} caractères.` })
+  if (nouveau === actuel.trim()) return res.status(400).json({ erreur: "Le nouveau mot de passe doit être différent de l'ancien." })
   const [[admin]] = await pool.query('SELECT mot_de_passe_hash FROM admins WHERE id = ?', [req.admin.id])
   if (!(await motDePasseCorrect(actuel, admin.mot_de_passe_hash))) return res.status(401).json({ erreur: 'Mot de passe actuel incorrect.' })
   const hash = await bcrypt.hash(nouveau, 10)
-  await pool.query('UPDATE admins SET mot_de_passe_hash = ? WHERE id = ?', [hash, req.admin.id])
+  await pool.query('UPDATE admins SET mot_de_passe_hash = ?, doit_changer_mdp = 0 WHERE id = ?', [hash, req.admin.id])
   // Les autres appareils connectés avec l'ancien mot de passe sont déconnectés.
   await pool.query('UPDATE admin_sessions SET revoque_le = NOW() WHERE admin_id = ? AND jti <> ? AND revoque_le IS NULL', [req.admin.id, req.admin.jti])
   res.json({ ok: true })
@@ -160,7 +161,7 @@ router.post('/admins', verifierAdmin, exigerProprietaire, async (req, res) => {
   const motDePasse = choisi || genererMotDePasse()
   const hash = await bcrypt.hash(motDePasse, 10)
   try {
-    await pool.query('INSERT INTO admins (identifiant, nom, mot_de_passe_hash, role) VALUES (?, ?, ?, ?)', [identifiant, nom, hash, role])
+    await pool.query('INSERT INTO admins (identifiant, nom, mot_de_passe_hash, role, doit_changer_mdp) VALUES (?, ?, ?, ?, 1)', [identifiant, nom, hash, role])
   } catch (err) {
     if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({ erreur: 'Cet identifiant est déjà utilisé.' })
     throw err
@@ -191,11 +192,15 @@ router.post('/admins/:id/reinitialiser-mot-de-passe', verifierAdmin, exigerPropr
   if (id === req.admin.id) return res.status(400).json({ erreur: 'Pour votre propre compte, utilisez « Changer mon mot de passe ».' })
   const [[cible]] = await pool.query('SELECT id FROM admins WHERE id = ?', [id])
   if (!cible) return res.status(404).json({ erreur: 'Compte introuvable.' })
-  const motDePasse = genererMotDePasse()
+  const choisi = String(req.body.motDePasse || '').trim()
+  if (choisi && choisi.length < MDP_MIN) return res.status(400).json({ erreur: `Le mot de passe doit contenir au moins ${MDP_MIN} caractères.` })
+  const motDePasse = choisi || genererMotDePasse()
   const hash = await bcrypt.hash(motDePasse, 10)
-  await pool.query('UPDATE admins SET mot_de_passe_hash = ? WHERE id = ?', [hash, id])
+  // Provisoire : le membre devra choisir le sien à sa prochaine connexion.
+  await pool.query('UPDATE admins SET mot_de_passe_hash = ?, doit_changer_mdp = 1 WHERE id = ?', [hash, id])
   await pool.query('UPDATE admin_sessions SET revoque_le = NOW() WHERE admin_id = ? AND revoque_le IS NULL', [id])
-  res.json({ motDePasse })
+  // Le mot de passe n'est renvoyé que s'il a été généré, et une seule fois.
+  res.json(choisi ? { ok: true } : { motDePasse })
 })
 
 router.get('/journal', verifierAdmin, exigerProprietaire, async (req, res) => {
