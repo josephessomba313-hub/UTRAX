@@ -3,6 +3,7 @@ import express from 'express'
 import cors from 'cors'
 import { pool } from './db.js'
 import { protegerAsync } from './async-securise.js'
+import { initialiserTablesAdmin } from './admin-schema.js'
 import authRoutes from './routes/auth.js'
 import ecolesRoutes from './routes/ecoles.js'
 import elevesRoutes from './routes/eleves.js'
@@ -14,10 +15,13 @@ import anneesRoutes from './routes/annees.js'
 import arrieresRoutes from './routes/arrieres.js'
 import agencesRoutes from './routes/agences.js'
 import notificationsRoutes from './routes/notifications.js'
+import adminRoutes from './routes/admin.js'
 
 // ---------- Avertissement si les clés secrètes sont encore celles de test ----------
 // Ne bloque jamais le démarrage (utile en développement), mais prévient clairement avant une
 // mise en ligne : ces valeurs doivent être remplacées par de longues chaînes aléatoires.
+// (ADMIN_KEY ne sert plus qu'à créer le premier compte UTRAX ; ensuite, chaque membre de l'équipe
+// se connecte avec son identifiant et son mot de passe.)
 const valeursParDefaut = { ADMIN_KEY: 'change-moi-aussi', JWT_SECRET: 'change-moi-en-production' }
 for (const [cle, defaut] of Object.entries(valeursParDefaut)) {
   if (!process.env[cle] || process.env[cle] === defaut) {
@@ -57,7 +61,7 @@ app.get('/api/health/db', async (req, res) => {
 // la requête sans réponse.
 const routeurs = [
   authRoutes, ecolesRoutes, elevesRoutes, paiementsRoutes, relancesRoutes, reglementsRoutes,
-  retraitsRoutes, anneesRoutes, arrieresRoutes, agencesRoutes, notificationsRoutes,
+  retraitsRoutes, anneesRoutes, arrieresRoutes, agencesRoutes, notificationsRoutes, adminRoutes,
 ]
 routeurs.forEach(protegerAsync)
 
@@ -72,6 +76,7 @@ app.use('/api/annees', anneesRoutes)
 app.use('/api/arrieres', arrieresRoutes)
 app.use('/api/agences', agencesRoutes)
 app.use('/api/notifications', notificationsRoutes)
+app.use('/api/admin', adminRoutes)
 
 app.use('/api', (req, res) => res.status(404).json({ erreur: 'Route introuvable.' }))
 
@@ -84,6 +89,9 @@ app.use((err, req, res, next) => {
   console.error(err)
   res.status(500).json({ erreur: 'Erreur interne du serveur.' })
 })
+
+// Tables des comptes UTRAX : créées au besoin (sans effet si elles existent déjà).
+await initialiserTablesAdmin().catch((err) => console.error('⚠️  Initialisation des comptes UTRAX impossible :', err.message))
 
 const PORT = process.env.PORT || 4000
 app.listen(PORT, () => console.log(`UTRAX API démarrée sur http://localhost:${PORT}`))
