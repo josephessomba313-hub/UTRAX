@@ -1,7 +1,7 @@
 import jwt from 'jsonwebtoken'
 import { pool } from '../db.js'
 
-// Connexion UTRAX : chaque membre de l'équipe a son compte (identifiant + mot de passe) et reçoit
+// Connexion LUTRAXE : chaque membre de l'équipe a son compte (identifiant + mot de passe) et reçoit
 // un jeton de session de 8 h. Contrairement à l'ancienne clé unique, une session peut être
 // RÉVOQUÉE avant son terme (déconnexion, compte désactivé, mot de passe changé) : le jeton est
 // revérifié en base à chaque requête.
@@ -10,15 +10,15 @@ export async function verifierAdmin(req, res, next) {
   const refus = (erreur) => res.status(401).json({ erreur, code: 'session_admin' })
 
   const entete = req.headers.authorization
-  if (!entete || !entete.startsWith('Bearer ')) return refus('Connexion UTRAX requise.')
+  if (!entete || !entete.startsWith('Bearer ')) return refus('Connexion LUTRAXE requise.')
 
   let payload
   try {
     payload = jwt.verify(entete.slice(7), process.env.JWT_SECRET)
   } catch {
-    return refus('Session UTRAX expirée, reconnectez-vous.')
+    return refus('Session LUTRAXE expirée, reconnectez-vous.')
   }
-  if (payload.type !== 'admin' || !payload.jti) return refus('Session UTRAX invalide, reconnectez-vous.')
+  if (payload.type !== 'admin' || !payload.jti) return refus('Session LUTRAXE invalide, reconnectez-vous.')
 
   try {
     const [lignes] = await pool.query(
@@ -27,7 +27,7 @@ export async function verifierAdmin(req, res, next) {
        WHERE s.jti = ? AND s.revoque_le IS NULL AND s.expire_le > NOW()`,
       [payload.jti]
     )
-    if (lignes.length === 0 || !lignes[0].actif) return refus('Session UTRAX terminée, reconnectez-vous.')
+    if (lignes.length === 0 || !lignes[0].actif) return refus('Session LUTRAXE terminée, reconnectez-vous.')
     req.admin = { ...lignes[0], jti: payload.jti }
     // Mot de passe provisoire (donné par le propriétaire) : seules la lecture du profil, le changement
     // de mot de passe et la déconnexion sont permis tant qu'il n'a pas été remplacé.
@@ -58,7 +58,7 @@ export async function verifierAdmin(req, res, next) {
 // Réservé au propriétaire (gestion de l'équipe, journal).
 export function exigerProprietaire(req, res, next) {
   if (req.admin?.role !== 'proprietaire') {
-    return res.status(403).json({ erreur: "Action réservée au propriétaire du compte UTRAX." })
+    return res.status(403).json({ erreur: "Action réservée au propriétaire du compte LUTRAXE." })
   }
   next()
 }

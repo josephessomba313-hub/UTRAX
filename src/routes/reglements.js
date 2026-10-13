@@ -7,7 +7,7 @@ import { limiteEssais } from '../middleware/limite-essais.js'
 import { anneeActive } from '../annee.js'
 import { insererAvecReference } from '../reference.js'
 
-// ⚠️ UTRAX ne détient jamais les fonds des écoles — c'est la banque dépositaire qui encaisse
+// ⚠️ LUTRAXE ne détient jamais les fonds des écoles — c'est la banque dépositaire qui encaisse
 // les versements faits aux agences et exécute les virements aux écoles. Ces routes calculent
 // QUOI virer et À QUI (commission prélevée automatiquement, reste net à l'école) ; elles
 // produisent l'instruction que la banque exécute — le logiciel n'effectue aucun mouvement
@@ -18,7 +18,7 @@ import { insererAvecReference } from '../reference.js'
 
 const router = Router()
 
-// Montant en attente de règlement, école par école — UTRAX uniquement.
+// Montant en attente de règlement, école par école — LUTRAXE uniquement.
 router.get('/en-attente', verifierAdmin, async (req, res) => {
   try {
     const [rows] = await pool.query(
@@ -36,7 +36,7 @@ router.get('/en-attente', verifierAdmin, async (req, res) => {
   }
 })
 
-// Générer le virement d'une école — prélève automatiquement la commission UTRAX due.
+// Générer le virement d'une école — prélève automatiquement la commission LUTRAXE due.
 // Tout se passe dans une transaction qui verrouille l'école et les paiements concernés : deux
 // appels simultanés ne peuvent plus virer deux fois la même somme.
 router.post('/:ecoleId/generer', verifierAdmin, async (req, res) => {
@@ -108,7 +108,7 @@ router.post('/:ecoleId/generer', verifierAdmin, async (req, res) => {
   }
 })
 
-// Historique de tous les règlements — UTRAX uniquement.
+// Historique de tous les règlements — LUTRAXE uniquement.
 // Par défaut, seule l'année scolaire en cours.
 router.get('/', verifierAdmin, async (req, res) => {
   const toutesAnnees = req.query.toutesAnnees === '1'

@@ -4,7 +4,7 @@ import { verifierAdmin } from '../middleware/auth-admin.js'
 
 const router = Router()
 
-// Arriérés non soldés, toutes écoles — UTRAX uniquement.
+// Arriérés non soldés, toutes écoles — LUTRAXE uniquement.
 router.get('/', verifierAdmin, async (req, res) => {
   const [rows] = await pool.query(
     `SELECT a.id, a.identifiant_utrax, a.nom_eleve, a.classe, a.montant_fcfa AS montant, a.cree_le,
@@ -19,7 +19,7 @@ router.get('/', verifierAdmin, async (req, res) => {
 })
 
 // Marquer un arriéré comme soldé — c'est-à-dire réglé directement auprès de l'école créancière,
-// en dehors de l'application (UTRAX ne détient jamais les fonds). Une fois soldé, il n'apparaît
+// en dehors de l'application (LUTRAXE ne détient jamais les fonds). Une fois soldé, il n'apparaît
 // plus dans la fiche du parent ni dans la vérification faite par une école avant une inscription.
 router.patch('/:id/solder', verifierAdmin, async (req, res) => {
   const commentaire = String(req.body.commentaire || '').trim().slice(0, 255) || null

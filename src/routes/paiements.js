@@ -12,7 +12,7 @@ const limiteCodeAgence = (nom) => limiteEssais({ max: 8, cle: (req) => `${nom}:$
 
 const router = Router()
 
-// UTRAX — derniers paiements de toutes les écoles (supervision, lecture seule).
+// LUTRAXE — derniers paiements de toutes les écoles (supervision, lecture seule).
 router.get('/recents', verifierAdmin, async (req, res) => {
   const [rows] = await pool.query(
     `SELECT p.reference, p.montant_fcfa AS montant, p.mode, p.origine, p.date_paiement AS date, p.created_at AS dateHeure,
@@ -47,7 +47,7 @@ router.post('/ecole', verifierEcole, limiteCodeAgence('paiement'), async (req, r
   )
   if (agences.length === 0) return res.status(404).json({ erreur: 'Établissement introuvable.' })
   const { agence_bancaire_id: agenceId, code_hash: codeHash } = agences[0]
-  if (!codeHash) return res.status(409).json({ erreur: "L'agence bancaire de votre établissement n'a pas encore de code de confirmation défini — contactez UTRAX." })
+  if (!codeHash) return res.status(409).json({ erreur: "L'agence bancaire de votre établissement n'a pas encore de code de confirmation défini — contactez LUTRAXE." })
   const codeValide = await bcrypt.compare(String(codeAgence).trim(), codeHash)
   if (!codeValide) return res.status(401).json({ erreur: "Code de l'agence incorrect." })
 
@@ -91,7 +91,7 @@ router.post('/ecole', verifierEcole, limiteCodeAgence('paiement'), async (req, r
       })
     }
 
-    const { reference } = await insererAvecReference('UTX', (ref) =>
+    const { reference } = await insererAvecReference('LTX', (ref) =>
       conn.query(
         `INSERT INTO paiements (eleve_id, annee_id, reference, montant_fcfa, agence_bancaire_id, origine, date_paiement)
          VALUES (?, ?, ?, ?, ?, 'ecole', CURDATE())`,
@@ -120,7 +120,7 @@ router.post('/parent', (req, res) => {
 // Le paiement n'est pas supprimé mais marqué annulé, avec un motif obligatoire : il n'est plus
 // compté dans les soldes, mais reste visible dans l'historique pour la traçabilité.
 // Un paiement déjà inclus dans un virement vers l'école ne peut plus être annulé ici : l'ajustement
-// du prochain virement passe par UTRAX.
+// du prochain virement passe par LUTRAXE.
 router.patch('/:id/annuler', verifierEcole, limiteCodeAgence('annulation'), async (req, res) => {
   const motif = String(req.body.motif || '').trim()
   const codeAgence = String(req.body.codeAgence || '').trim()
@@ -132,7 +132,7 @@ router.patch('/:id/annuler', verifierEcole, limiteCodeAgence('annulation'), asyn
     [req.ecoleId]
   )
   const codeHash = ecoles[0]?.code_hash
-  if (!codeHash) return res.status(409).json({ erreur: "L'agence bancaire de votre établissement n'a pas encore de code de confirmation défini — contactez UTRAX." })
+  if (!codeHash) return res.status(409).json({ erreur: "L'agence bancaire de votre établissement n'a pas encore de code de confirmation défini — contactez LUTRAXE." })
   const codeValide = await bcrypt.compare(codeAgence, codeHash)
   if (!codeValide) return res.status(401).json({ erreur: "Code de l'agence incorrect." })
 
@@ -148,7 +148,7 @@ router.patch('/:id/annuler', verifierEcole, limiteCodeAgence('annulation'), asyn
       [req.params.id, req.ecoleId]
     )
     if (paiement && !paiement.annule && paiement.reglement_id) {
-      return res.status(409).json({ erreur: 'Ce paiement a déjà été inclus dans un virement vers votre établissement : il ne peut plus être annulé ici. Contactez UTRAX pour un ajustement.' })
+      return res.status(409).json({ erreur: 'Ce paiement a déjà été inclus dans un virement vers votre établissement : il ne peut plus être annulé ici. Contactez LUTRAXE pour un ajustement.' })
     }
     return res.status(404).json({ erreur: 'Paiement introuvable dans cet établissement, ou déjà annulé.' })
   }

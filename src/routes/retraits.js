@@ -3,9 +3,9 @@ import { pool } from '../db.js'
 import { verifierAdmin } from '../middleware/auth-admin.js'
 import { insererAvecReference } from '../reference.js'
 
-// ⚠️ UTRAX ne détient jamais les fonds des écoles ni des parents — c'est la banque dépositaire
+// ⚠️ LUTRAXE ne détient jamais les fonds des écoles ni des parents — c'est la banque dépositaire
 // qui les encaisse et exécute les virements. Ces routes ne « retirent » rien au sens propre :
-// elles calculent la commission due à UTRAX et produisent l'instruction de virement que la
+// elles calculent la commission due à LUTRAXE et produisent l'instruction de virement que la
 // banque exécute ensuite. « Générer » = créer l'instruction ; le virement réel est un acte
 // bancaire, hors logiciel.
 
@@ -17,12 +17,12 @@ async function calculerSolde(conn = pool) {
   return Number(commission_totale) - Number(deja_instruit)
 }
 
-// Commission UTRAX due, pas encore virée par la banque
+// Commission LUTRAXE due, pas encore virée par la banque
 router.get('/solde', verifierAdmin, async (req, res) => {
   res.json({ soldeDisponible: await calculerSolde() })
 })
 
-// Créer l'instruction de virement vers le compte bancaire d'UTRAX.
+// Créer l'instruction de virement vers le compte bancaire de LUTRAXE.
 // Un verrou nommé garantit que deux demandes simultanées ne créent pas deux instructions
 // pour la même commission.
 router.post('/generer', verifierAdmin, async (req, res) => {
@@ -38,7 +38,7 @@ router.post('/generer', verifierAdmin, async (req, res) => {
     const solde = await calculerSolde(conn)
     if (solde <= 0) return res.status(400).json({ erreur: 'Aucune commission en attente pour le moment.' })
 
-    const { reference } = await insererAvecReference('UTX-OUT', (ref) =>
+    const { reference } = await insererAvecReference('LTX-OUT', (ref) =>
       conn.query('INSERT INTO retraits_utrax (reference, montant_fcfa, date_retrait) VALUES (?, ?, CURDATE())', [ref, solde])
     )
     res.status(201).json({ reference, montant: solde })

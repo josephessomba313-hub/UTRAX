@@ -10,7 +10,7 @@ function libelleSuivant(libelle) {
   return `${a + 1}-${b + 1}`
 }
 
-// Année active et historique des années — UTRAX uniquement.
+// Année active et historique des années — LUTRAXE uniquement.
 router.get('/', verifierAdmin, async (req, res) => {
   const [annees] = await pool.query(
     'SELECT id, libelle, active, ouverte_le, cloturee_le FROM annees_scolaires ORDER BY id DESC'
@@ -19,9 +19,9 @@ router.get('/', verifierAdmin, async (req, res) => {
   res.json({ active, prochaine: active ? libelleSuivant(active.libelle) : null, annees })
 })
 
-// Ouvrir la nouvelle année — UTRAX uniquement.
+// Ouvrir la nouvelle année — LUTRAXE uniquement.
 //  1. refuse s'il reste des paiements non réglés aux écoles (commission de l'année à prélever d'abord) ;
-//  2. enregistre en arriérés le solde impayé de chaque élève actif, rattaché à son identifiant UTRAX
+//  2. enregistre en arriérés le solde impayé de chaque élève actif, rattaché à son identifiant LUTRAXE
 //     et à l'école créancière (avec les frais de l'année qui se termine) ;
 //  3. clôture l'année en cours et ouvre la suivante.
 // Le verrou posé sur l'année active (FOR UPDATE) fait attendre les paiements et virements en

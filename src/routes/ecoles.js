@@ -9,14 +9,14 @@ import { anneeActive } from '../annee.js'
 
 const router = Router()
 
-// Commission UTRAX par élève actif et par an, appliquée à chaque NOUVEL établissement.
+// Commission LUTRAXE par élève actif et par an, appliquée à chaque NOUVEL établissement.
 // Modifiable sans toucher au code : variable COMMISSION_PAR_ELEVE_FCFA sur Railway. Les établissements
-// déjà créés gardent leur propre valeur (modifiable depuis leur fiche, côté UTRAX).
+// déjà créés gardent leur propre valeur (modifiable depuis leur fiche, côté LUTRAXE).
 const COMMISSION_DEFAUT_FCFA = Number.isInteger(Number(process.env.COMMISSION_PAR_ELEVE_FCFA)) && Number(process.env.COMMISSION_PAR_ELEVE_FCFA) >= 0 && process.env.COMMISSION_PAR_ELEVE_FCFA
   ? Number(process.env.COMMISSION_PAR_ELEVE_FCFA)
   : 1999
 
-// Liste des écoles — supervision UTRAX
+// Liste des écoles — supervision LUTRAXE
 router.get('/', verifierAdmin, async (req, res) => {
   const [ecoles] = await pool.query(
     `SELECT ec.id, ec.nom, ec.ville, ec.code, ec.actif, ec.commission_fcfa, ec.created_at,
@@ -53,7 +53,7 @@ router.get('/:id/classes', async (req, res) => {
   res.json(classes)
 })
 
-// Créer un établissement — UTRAX uniquement.
+// Créer un établissement — LUTRAXE uniquement.
 // Body attendu : { nom, ville, code, motDePasse, classes: [{ nom, ordre, frais }] }
 router.post('/', verifierAdmin, async (req, res) => {
   const { nom, ville, code, motDePasse, classes, agenceBancaireId } = req.body
@@ -112,14 +112,14 @@ router.post('/', verifierAdmin, async (req, res) => {
   }
 })
 
-// Retirer / réactiver un établissement — UTRAX uniquement.
+// Retirer / réactiver un établissement — LUTRAXE uniquement.
 router.patch('/:id/statut', verifierAdmin, async (req, res) => {
   const { actif } = req.body
   await pool.query('UPDATE ecoles SET actif = ? WHERE id = ?', [!!actif, req.params.id])
   res.json({ ok: true })
 })
 
-// Changer la commission UTRAX d'une école (FCFA par élève actif et par an) — UTRAX uniquement.
+// Changer la commission LUTRAXE d'une école (FCFA par élève actif et par an) — LUTRAXE uniquement.
 // Elle s'applique aux PROCHAINS virements : les virements déjà générés gardent leur commission.
 router.patch('/:id/commission', verifierAdmin, async (req, res) => {
   const commission = Number(req.body.commission)
@@ -132,7 +132,7 @@ router.patch('/:id/commission', verifierAdmin, async (req, res) => {
   res.json({ ok: true, commission })
 })
 
-// Changer l'agence bancaire d'une école — UTRAX uniquement. Les paiements déjà enregistrés
+// Changer l'agence bancaire d'une école — LUTRAXE uniquement. Les paiements déjà enregistrés
 // gardent l'agence à laquelle ils ont réellement été faits (non rétroactif).
 router.patch('/:id/agence', verifierAdmin, async (req, res) => {
   const { agenceBancaireId } = req.body
@@ -145,8 +145,8 @@ router.patch('/:id/agence', verifierAdmin, async (req, res) => {
   res.json({ ok: true })
 })
 
-// Réinitialiser le mot de passe d'une école — UTRAX uniquement.
-// Le mot de passe est stocké chiffré (haché) et ne peut jamais être relu en clair, même par UTRAX ;
+// Réinitialiser le mot de passe d'une école — LUTRAXE uniquement.
+// Le mot de passe est stocké chiffré (haché) et ne peut jamais être relu en clair, même par LUTRAXE ;
 // cette route en génère un nouveau, aléatoire, et le renvoie UNE SEULE FOIS pour être transmis à
 // l'école. Il n'est conservé nulle part ailleurs qu'ici, dans cette réponse.
 const ALPHABET_MDP = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789'
@@ -166,7 +166,7 @@ router.post('/:id/reinitialiser-mot-de-passe', verifierAdmin, async (req, res) =
   res.json({ motDePasse })
 })
 
-// Statistiques par établissement (élèves actifs uniquement) — UTRAX uniquement, lecture seule.
+// Statistiques par établissement (élèves actifs uniquement) — LUTRAXE uniquement, lecture seule.
 router.get('/stats', verifierAdmin, async (req, res) => {
   const annee = await anneeActive()
   const [lignes] = await pool.query(
@@ -193,7 +193,7 @@ router.get('/stats', verifierAdmin, async (req, res) => {
   res.json(Object.values(stats))
 })
 
-// Inspection d'un établissement — UTRAX uniquement, LECTURE SEULE (aucune modification possible,
+// Inspection d'un établissement — LUTRAXE uniquement, LECTURE SEULE (aucune modification possible,
 // pas de jeton d'école). Les numéros de téléphone des parents ne sont pas transmis.
 router.get('/:id/inspection', verifierAdmin, async (req, res) => {
   const [[ecole]] = await pool.query(

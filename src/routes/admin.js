@@ -54,7 +54,7 @@ function journaliser(adminId, identifiant, action, statut, ip) {
   ).catch((err) => console.error('Journal admin :', err.message))
 }
 
-// ---------- Public : y a-t-il déjà un compte UTRAX ? (choisit l'écran de connexion) ----------
+// ---------- Public : y a-t-il déjà un compte LUTRAXE ? (choisit l'écran de connexion) ----------
 router.get('/etat', async (req, res) => {
   const [[{ n }]] = await pool.query('SELECT COUNT(*) AS n FROM admins')
   res.json({ initialise: Number(n) > 0 })
@@ -81,7 +81,7 @@ router.post('/premier-compte', limiteEssais({ max: 5 }), async (req, res) => {
      SELECT ?, ?, ?, 'proprietaire' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM admins)`,
     [identifiant, nom, hash]
   )
-  if (r.affectedRows === 0) return res.status(409).json({ erreur: 'Un compte UTRAX existe déjà : utilisez « Se connecter ».' })
+  if (r.affectedRows === 0) return res.status(409).json({ erreur: 'Un compte LUTRAXE existe déjà : utilisez « Se connecter ».' })
 
   const admin = { id: r.insertId, identifiant, nom, role: 'proprietaire' }
   const token = await ouvrirSession(admin, req.ip)

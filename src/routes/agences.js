@@ -5,7 +5,7 @@ import { verifierAdmin } from '../middleware/auth-admin.js'
 
 const router = Router()
 
-// Liste des agences bancaires — UTRAX uniquement. codeDefini indique si un code de confirmation
+// Liste des agences bancaires — LUTRAXE uniquement. codeDefini indique si un code de confirmation
 // existe déjà (le code lui-même, chiffré, n'est jamais renvoyé).
 router.get('/', verifierAdmin, async (req, res) => {
   const [rows] = await pool.query(
@@ -14,9 +14,9 @@ router.get('/', verifierAdmin, async (req, res) => {
   res.json(rows.map((r) => ({ ...r, codeDefini: !!r.codeDefini })))
 })
 
-// Créer une agence bancaire — UTRAX uniquement.
+// Créer une agence bancaire — LUTRAXE uniquement.
 // Le numéro de téléphone est celui attribué par la banque avant l'enregistrement sur la
-// plateforme, pour garder un contact direct entre la banque et UTRAX. Le code de confirmation
+// plateforme, pour garder un contact direct entre la banque et LUTRAXE. Le code de confirmation
 // (4 caractères minimum) est ce que l'école devra ressaisir pour valider chaque paiement fait
 // à cette agence — la preuve que le versement y a bien été effectué.
 router.post('/', verifierAdmin, async (req, res) => {
@@ -32,7 +32,7 @@ router.post('/', verifierAdmin, async (req, res) => {
   res.status(201).json({ id: result.insertId, nom, telephone })
 })
 
-// Définir ou changer le code de confirmation d'une agence existante — UTRAX uniquement.
+// Définir ou changer le code de confirmation d'une agence existante — LUTRAXE uniquement.
 router.post('/:id/code', verifierAdmin, async (req, res) => {
   const code = String(req.body.code || '').trim()
   if (code.length < 4) return res.status(400).json({ erreur: 'Le code de confirmation doit contenir au moins 4 caractères.' })

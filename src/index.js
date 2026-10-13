@@ -20,7 +20,7 @@ import adminRoutes from './routes/admin.js'
 // ---------- Avertissement si les clés secrètes sont encore celles de test ----------
 // Ne bloque jamais le démarrage (utile en développement), mais prévient clairement avant une
 // mise en ligne : ces valeurs doivent être remplacées par de longues chaînes aléatoires.
-// (ADMIN_KEY ne sert plus qu'à créer le premier compte UTRAX ; ensuite, chaque membre de l'équipe
+// (ADMIN_KEY ne sert plus qu'à créer le premier compte LUTRAXE ; ensuite, chaque membre de l'équipe
 // se connecte avec son identifiant et son mot de passe.)
 const valeursParDefaut = { ADMIN_KEY: 'change-moi-aussi', JWT_SECRET: 'change-moi-en-production' }
 for (const [cle, defaut] of Object.entries(valeursParDefaut)) {
@@ -90,8 +90,8 @@ app.use((err, req, res, next) => {
   res.status(500).json({ erreur: 'Erreur interne du serveur.' })
 })
 
-// Tables des comptes UTRAX : créées au besoin (sans effet si elles existent déjà).
-await initialiserTablesAdmin().catch((err) => console.error('⚠️  Initialisation des comptes UTRAX impossible :', err.message))
+// Tables des comptes LUTRAXE : créées au besoin (sans effet si elles existent déjà).
+await initialiserTablesAdmin().catch((err) => console.error('⚠️  Initialisation des comptes LUTRAXE impossible :', err.message))
 
 const PORT = process.env.PORT || 4000
-app.listen(PORT, () => console.log(`UTRAX API démarrée sur http://localhost:${PORT}`))
+app.listen(PORT, () => console.log(`LUTRAXE API démarrée sur http://localhost:${PORT}`))

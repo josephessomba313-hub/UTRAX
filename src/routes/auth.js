@@ -24,7 +24,7 @@ router.post('/ecole/login', limiteEssais({ max: 15 }), async (req, res) => {
   )
   const ecole = rows[0]
   if (!ecole) return res.status(401).json({ erreur: 'Code ou mot de passe incorrect.' })
-  if (!ecole.actif) return res.status(403).json({ erreur: "Cet établissement n'est plus partenaire actif d'UTRAX." })
+  if (!ecole.actif) return res.status(403).json({ erreur: "Cet établissement n'est plus partenaire actif de LUTRAXE." })
 
   const valide = await bcrypt.compare(String(motDePasse), ecole.mot_de_passe_hash)
   if (!valide) return res.status(401).json({ erreur: 'Code ou mot de passe incorrect.' })

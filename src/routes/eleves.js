@@ -20,13 +20,13 @@ function suffixeAleatoire(longueur) {
 const normaliser = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
   .toLowerCase().replace(/\s+/g, ' ').trim()
 
-// Total des arriérés (toutes années, toutes écoles) rattachés à l'identifiant UTRAX de l'élève.
+// Total des arriérés (toutes années, toutes écoles) rattachés à l'identifiant LUTRAXE de l'élève.
 const SQL_ARRIERES = `(SELECT COALESCE(SUM(a.montant_fcfa), 0) FROM arrieres a WHERE a.identifiant_utrax = e.identifiant_utrax AND a.solde = FALSE)`
 
 const MOTIFS_SORTIE = ['exclusion', 'abandon', 'diplome', 'transfert']
 const LIBELLE_MOTIF = { exclusion: 'Exclusion', abandon: 'Départ en cours d\'année', diplome: 'Fin de scolarité', transfert: 'Transfert vers une autre école' }
 
-// Antécédents d'un élève, toutes écoles confondues, à partir de son identifiant UTRAX permanent —
+// Antécédents d'un élève, toutes écoles confondues, à partir de son identifiant LUTRAXE permanent —
 // utilisé avant et pendant une inscription pour qu'une école sache si l'élève a été exclu ailleurs,
 // s'il est déjà inscrit activement dans une autre école, et ce qu'il doit en arriérés. Ne bloque rien :
 // l'information est donnée à l'école, qui reste seule décisionnaire.
@@ -76,20 +76,20 @@ router.get('/', verifierEcole, async (req, res) => {
   res.json(eleves)
 })
 
-// CÔTÉ ÉCOLE — consulter le passé d'un élève par son identifiant UTRAX AVANT de l'inscrire
+// CÔTÉ ÉCOLE — consulter le passé d'un élève par son identifiant LUTRAXE AVANT de l'inscrire
 // (exclusions, arriérés, inscription active ailleurs). Le nom doit correspondre, comme à l'inscription.
 router.get('/identifiant/:id/antecedents', verifierEcole, limiteEssais({ max: 20, cle: (req) => `antecedents:${req.ecoleId}` }), async (req, res) => {
   const identifiant = req.params.id.trim().toUpperCase()
   const nomAttendu = String(req.query.nom || '').trim()
   const [existants] = await pool.query('SELECT nom FROM eleves WHERE identifiant_utrax = ?', [identifiant])
   if (existants.length === 0 || (nomAttendu && !existants.some((e) => normaliser(e.nom) === normaliser(nomAttendu)))) {
-    return res.status(404).json({ erreur: 'Identifiant UTRAX inconnu, ou qui ne correspond pas au nom saisi.' })
+    return res.status(404).json({ erreur: 'Identifiant LUTRAXE inconnu, ou qui ne correspond pas au nom saisi.' })
   }
   res.json(await antecedents(identifiant, req.ecoleId))
 })
 
 // CÔTÉ ÉCOLE — inscrire un élève. Matricule généré (CODE-XXXXXX, aléatoire).
-// Nouvel élève : un identifiant UTRAX permanent (UE-XXXXXXXX) lui est attribué.
+// Nouvel élève : un identifiant LUTRAXE permanent (UE-XXXXXXXX) lui est attribué.
 // Élève venant d'une autre école : passer son identifiantUtrax ; il doit correspondre au nom saisi,
 // et ses arriérés éventuels le suivent.
 router.post('/', verifierEcole, async (req, res) => {
@@ -107,7 +107,7 @@ router.post('/', verifierEcole, async (req, res) => {
       const [existants] = await pool.query('SELECT nom, ecole_id FROM eleves WHERE identifiant_utrax = ?', [identifiantSaisi])
       // Même message dans les deux cas : on ne révèle pas si un identifiant existe.
       if (existants.length === 0 || !existants.some((e) => normaliser(e.nom) === normaliser(nom))) {
-        return res.status(404).json({ erreur: 'Identifiant UTRAX inconnu, ou qui ne correspond pas au nom saisi.' })
+        return res.status(404).json({ erreur: 'Identifiant LUTRAXE inconnu, ou qui ne correspond pas au nom saisi.' })
       }
       if (existants.some((e) => Number(e.ecole_id) === Number(req.ecoleId))) {
         return res.status(409).json({ erreur: 'Cet élève est déjà inscrit dans votre établissement.' })
@@ -150,7 +150,7 @@ router.post('/', verifierEcole, async (req, res) => {
 })
 
 // CÔTÉ ÉCOLE — archiver un élève, avec le motif de sortie (exclusion, abandon, diplôme, transfert) —
-// ce motif suit l'élève partout via son identifiant UTRAX. Réintégrer un élève efface le motif.
+// ce motif suit l'élève partout via son identifiant LUTRAXE. Réintégrer un élève efface le motif.
 router.patch('/:id/statut', verifierEcole, async (req, res) => {
   const { actif } = req.body
   let motif = null
@@ -193,7 +193,7 @@ router.patch('/:id/statut', verifierEcole, async (req, res) => {
         [eleve.id]
       )
       // L'arriéré créé à l'archivage n'a plus lieu d'être : l'élève est de nouveau compté normalement.
-      // (Un arriéré déjà soldé par UTRAX, ou celui d'une année précédente, n'est pas touché.)
+      // (Un arriéré déjà soldé par LUTRAXE, ou celui d'une année précédente, n'est pas touché.)
       await conn.query(
         'DELETE FROM arrieres WHERE annee_id = ? AND eleve_id = ? AND ecole_id = ? AND solde = FALSE',
         [anneeId, eleve.id, req.ecoleId]
@@ -208,7 +208,7 @@ router.patch('/:id/statut', verifierEcole, async (req, res) => {
     )
 
     // Un élève qui quitte l'établissement avec une scolarité impayée laisse un arriéré, rattaché à son
-    // identifiant UTRAX : il apparaît dans la fiche du parent et dans la vérification faite par une
+    // identifiant LUTRAXE : il apparaît dans la fiche du parent et dans la vérification faite par une
     // nouvelle école (sans jamais bloquer l'inscription).
     const [[{ paye }]] = await conn.query(
       'SELECT COALESCE(SUM(montant_fcfa), 0) AS paye FROM paiements WHERE eleve_id = ? AND annee_id = ? AND annule = FALSE',
@@ -247,7 +247,7 @@ router.patch('/:id/statut', verifierEcole, async (req, res) => {
   }
 })
 
-// CÔTÉ ÉCOLE — la rentrée est-elle à faire ? (une seule fois par année, après l'ouverture par UTRAX)
+// CÔTÉ ÉCOLE — la rentrée est-elle à faire ? (une seule fois par année, après l'ouverture par LUTRAXE)
 router.get('/rentree/etat', verifierEcole, async (req, res) => {
   const annee = await anneeActive()
   const [precedentes] = await pool.query('SELECT 1 FROM annees_scolaires WHERE id < ? LIMIT 1', [annee.id])
@@ -271,7 +271,7 @@ router.post('/rentree', verifierEcole, async (req, res) => {
 
   const [precedentes] = await pool.query('SELECT 1 FROM annees_scolaires WHERE id < ? LIMIT 1', [annee.id])
   if (precedentes.length === 0) {
-    return res.status(409).json({ erreur: "La rentrée n'est possible qu'après l'ouverture d'une nouvelle année par UTRAX." })
+    return res.status(409).json({ erreur: "La rentrée n'est possible qu'après l'ouverture d'une nouvelle année par LUTRAXE." })
   }
 
   const conn = await pool.getConnection()
