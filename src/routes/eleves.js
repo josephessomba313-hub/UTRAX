@@ -390,4 +390,157 @@ router.get('/:id/paiements', verifierFicheOuEcole, async (req, res) => {
   res.json(paiements)
 })
 
+// CÔTÉ ÉCOLE — corriger le nom d'un élève, UNIQUEMENT en cas d'erreur de saisie à l'enregistrement.
+// Le nom sert aussi à reconnaître l'élève quand il change d'établissement (identifiant LUTRAXE + nom) :
+// la correction est donc encadrée.
+//   - dans les 30 jours qui suivent l'enregistrement, 3 corrections au maximum par élève ;
+//   - refusée si l'élève est aussi enregistré dans un autre établissement (son nom y est déjà connu) ;
+//   - l'école doit confirmer qu'il s'agit d'une erreur de saisie ;
+//   - l'ancien nom est conservé dans l'historique (table corrections_nom_eleves).
+const FENETRE_CORRECTION_NOM_JOURS = 30
+const MAX_CORRECTIONS_NOM = 3
+
+router.patch('/:id/nom', verifierEcole, async (req, res) => {
+  const nom = String(req.body.nom || '').trim().replace(/\s+/g, ' ')
+  if (nom.length < 2 || nom.length > 150) return res.status(400).json({ erreur: 'Le nom doit contenir entre 2 et 150 caractères.' })
+  if (req.body.confirmeErreur !== true) return res.status(400).json({ erreur: "Confirmez qu'il s'agit d'une erreur de saisie à l'enregistrement." })
+
+  const conn = await pool.getConnection()
+  try {
+    await conn.beginTransaction()
+    const [eleves] = await conn.query(
+      `SELECT id, nom, identifiant_utrax, DATEDIFF(NOW(), created_at) AS jours
+       FROM eleves WHERE id = ? AND ecole_id = ? FOR UPDATE`,
+      [req.params.id, req.ecoleId]
+    )
+    if (eleves.length === 0) {
+      await conn.rollback()
+      return res.status(404).json({ erreur: 'Élève introuvable dans cet établissement.' })
+    }
+    const eleve = eleves[0]
+    if (eleve.nom === nom) {
+      await conn.rollback()
+      return res.status(400).json({ erreur: 'Le nom saisi est identique au nom actuel.' })
+    }
+    if (Number(eleve.jours) > FENETRE_CORRECTION_NOM_JOURS) {
+      await conn.rollback()
+      return res.status(409).json({ erreur: `Le nom ne peut être corrigé que dans les ${FENETRE_CORRECTION_NOM_JOURS} jours suivant l'enregistrement de l'élève. Contactez LUTRAXE si une correction reste nécessaire.` })
+    }
+    const [[{ n }]] = await conn.query('SELECT COUNT(*) AS n FROM corrections_nom_eleves WHERE eleve_id = ?', [eleve.id])
+    if (Number(n) >= MAX_CORRECTIONS_NOM) {
+      await conn.rollback()
+      return res.status(409).json({ erreur: `Le nom de cet élève a déjà été corrigé ${MAX_CORRECTIONS_NOM} fois. Contactez LUTRAXE.` })
+    }
+    const [ailleurs] = await conn.query(
+      'SELECT 1 FROM eleves WHERE identifiant_utrax = ? AND ecole_id <> ? LIMIT 1',
+      [eleve.identifiant_utrax, req.ecoleId]
+    )
+    if (ailleurs.length > 0) {
+      await conn.rollback()
+      return res.status(409).json({ erreur: "Cet élève est aussi enregistré dans un autre établissement : son nom ne peut pas être modifié ici. Contactez LUTRAXE." })
+    }
+
+    await conn.query('UPDATE eleves SET nom = ? WHERE id = ?', [nom, eleve.id])
+    await conn.query(
+      'INSERT INTO corrections_nom_eleves (eleve_id, ecole_id, ancien_nom, nouveau_nom) VALUES (?, ?, ?, ?)',
+      [eleve.id, req.ecoleId, eleve.nom, nom]
+    )
+    // Les arriérés déjà enregistrés à son nom suivent la correction.
+    await conn.query('UPDATE arrieres SET nom_eleve = ? WHERE eleve_id = ? AND ecole_id = ?', [nom, eleve.id, req.ecoleId])
+    await conn.commit()
+    res.json({ ok: true, nom })
+  } catch (err) {
+    await conn.rollback().catch(() => {})
+    console.error(err)
+    res.status(500).json({ erreur: 'Échec de la correction du nom.' })
+  } finally {
+    conn.release()
+  }
+})
+
+// CÔTÉ ÉCOLE — corriger la classe d'un élève inscrit dans la mauvaise classe, UNIQUEMENT en cas d'erreur
+// d'enregistrement. (Le passage normal à la classe supérieure se fait par la « rentrée ».)
+// Garde-fous : élève actif, classe du même établissement, dans les 30 jours qui suivent l'enregistrement,
+// 3 corrections au maximum, confirmation de l'école, historique conservé, et refus si les paiements déjà
+// faits dépassent les frais de la nouvelle classe. Les paiements restent rattachés à l'élève : seul son
+// solde change, selon les frais de la bonne classe.
+router.patch('/:id/classe', verifierEcole, async (req, res) => {
+  const classeId = Number(req.body.classeId)
+  if (!Number.isInteger(classeId) || classeId <= 0) return res.status(400).json({ erreur: 'Classe invalide.' })
+  if (req.body.confirmeErreur !== true) return res.status(400).json({ erreur: "Confirmez qu'il s'agit d'une erreur d'enregistrement." })
+
+  const conn = await pool.getConnection()
+  try {
+    await conn.beginTransaction()
+    // Verrou partagé sur l'année active, puis verrou sur l'élève (pas de paiement en même temps).
+    const [annees] = await conn.query('SELECT id FROM annees_scolaires WHERE active = TRUE LIMIT 1 FOR SHARE')
+    if (annees.length === 0) {
+      await conn.rollback()
+      return res.status(500).json({ erreur: 'Aucune année scolaire active.' })
+    }
+    const anneeId = Number(annees[0].id)
+
+    const [eleves] = await conn.query(
+      `SELECT e.id, e.actif, e.classe_id, c.nom AS classe, DATEDIFF(NOW(), e.created_at) AS jours
+       FROM eleves e JOIN classes c ON c.id = e.classe_id
+       WHERE e.id = ? AND e.ecole_id = ?
+       FOR UPDATE OF e`,
+      [req.params.id, req.ecoleId]
+    )
+    if (eleves.length === 0) {
+      await conn.rollback()
+      return res.status(404).json({ erreur: 'Élève introuvable dans cet établissement.' })
+    }
+    const eleve = eleves[0]
+    if (!eleve.actif) {
+      await conn.rollback()
+      return res.status(409).json({ erreur: "Cet élève est archivé : réintégrez-le avant de corriger sa classe." })
+    }
+    if (Number(eleve.classe_id) === classeId) {
+      await conn.rollback()
+      return res.status(400).json({ erreur: "L'élève est déjà dans cette classe." })
+    }
+    const [classes] = await conn.query('SELECT id, nom, frais_fcfa FROM classes WHERE id = ? AND ecole_id = ?', [classeId, req.ecoleId])
+    if (classes.length === 0) {
+      await conn.rollback()
+      return res.status(400).json({ erreur: 'Classe invalide pour cet établissement.' })
+    }
+    const nouvelle = classes[0]
+
+    if (Number(eleve.jours) > FENETRE_CORRECTION_NOM_JOURS) {
+      await conn.rollback()
+      return res.status(409).json({ erreur: `La classe ne peut être corrigée que dans les ${FENETRE_CORRECTION_NOM_JOURS} jours suivant l'enregistrement de l'élève. Contactez LUTRAXE si une correction reste nécessaire.` })
+    }
+    const [[{ n }]] = await conn.query('SELECT COUNT(*) AS n FROM corrections_classe_eleves WHERE eleve_id = ?', [eleve.id])
+    if (Number(n) >= MAX_CORRECTIONS_NOM) {
+      await conn.rollback()
+      return res.status(409).json({ erreur: `La classe de cet élève a déjà été corrigée ${MAX_CORRECTIONS_NOM} fois. Contactez LUTRAXE.` })
+    }
+    const [[{ paye }]] = await conn.query(
+      'SELECT COALESCE(SUM(montant_fcfa), 0) AS paye FROM paiements WHERE eleve_id = ? AND annee_id = ? AND annule = FALSE',
+      [eleve.id, anneeId]
+    )
+    if (Number(paye) > Number(nouvelle.frais_fcfa)) {
+      await conn.rollback()
+      return res.status(409).json({
+        erreur: `Cet élève a déjà payé ${Number(paye).toLocaleString('fr-FR')} FCFA, plus que les frais de la classe « ${nouvelle.nom} » (${Number(nouvelle.frais_fcfa).toLocaleString('fr-FR')} FCFA). Annulez d'abord le paiement en trop, ou contactez LUTRAXE.`,
+      })
+    }
+
+    await conn.query('UPDATE eleves SET classe_id = ? WHERE id = ?', [classeId, eleve.id])
+    await conn.query(
+      'INSERT INTO corrections_classe_eleves (eleve_id, ecole_id, ancienne_classe, nouvelle_classe) VALUES (?, ?, ?, ?)',
+      [eleve.id, req.ecoleId, eleve.classe, nouvelle.nom]
+    )
+    await conn.commit()
+    res.json({ ok: true, classe: nouvelle.nom, frais: Number(nouvelle.frais_fcfa) })
+  } catch (err) {
+    await conn.rollback().catch(() => {})
+    console.error(err)
+    res.status(500).json({ erreur: 'Échec de la correction de la classe.' })
+  } finally {
+    conn.release()
+  }
+})
+
 export default router
