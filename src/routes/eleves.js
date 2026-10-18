@@ -4,6 +4,7 @@ import { pool } from '../db.js'
 import { anneeActive } from '../annee.js'
 import { verifierEcole } from '../middleware/auth-ecole.js'
 import { limiteEssais } from '../middleware/limite-essais.js'
+import { limiteRequetes } from '../middleware/limite-requetes.js'
 import { signerFiche, verifierFicheOuEcole } from '../middleware/auth-fiche.js'
 
 const router = Router()
@@ -331,7 +332,7 @@ router.post('/rentree', verifierEcole, async (req, res) => {
 
 // CÔTÉ PARENT — recherche publique : école -> classe -> matricule -> fiche.
 // Ne renvoie ni téléphone, ni code : seulement la fiche de l'année en cours et les arriérés éventuels.
-router.get('/public/fiche', limiteEssais(), async (req, res) => {
+router.get('/public/fiche', limiteRequetes({ max: 60 }), limiteEssais(), async (req, res) => {
   const { codeEcole, classe, matricule } = req.query
   if (!codeEcole || !classe || !matricule) {
     return res.status(400).json({ erreur: 'codeEcole, classe et matricule requis.' })

@@ -5,6 +5,7 @@ import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto
 import { pool } from '../db.js'
 import { verifierAdmin, exigerProprietaire } from '../middleware/auth-admin.js'
 import { limiteEssais } from '../middleware/limite-essais.js'
+import { limiteCalculsMotDePasse } from '../middleware/limite-simultanes.js'
 
 const router = Router()
 
@@ -63,7 +64,7 @@ router.get('/etat', async (req, res) => {
 // ---------- Création du PREMIER compte (propriétaire) ----------
 // Possible une seule fois, tant qu'aucun compte n'existe, et seulement avec la clé d'installation
 // (la variable ADMIN_KEY de Railway). Ensuite cette clé ne sert plus à rien.
-router.post('/premier-compte', limiteEssais({ max: 5 }), async (req, res) => {
+router.post('/premier-compte', limiteCalculsMotDePasse, limiteEssais({ max: 5 }), async (req, res) => {
   if (!cleInstallationValide(req.headers['x-admin-key'])) {
     return res.status(401).json({ erreur: "Clé d'installation incorrecte." })
   }
@@ -95,7 +96,7 @@ router.post('/premier-compte', limiteEssais({ max: 5 }), async (req, res) => {
 const limiteIp = limiteEssais({ max: 10 })
 const limiteIdentifiant = limiteEssais({ max: 8, cle: (req) => `admin:${String(req.body?.identifiant || '').toLowerCase().slice(0, 60)}` })
 
-router.post('/login', limiteIp, limiteIdentifiant, async (req, res) => {
+router.post('/login', limiteCalculsMotDePasse, limiteIp, limiteIdentifiant, async (req, res) => {
   const identifiant = String(req.body.identifiant || '').trim().toLowerCase()
   const motDePasse = String(req.body.motDePasse || '')
   if (!identifiant || !motDePasse) return res.status(400).json({ erreur: 'Identifiant et mot de passe requis.' })

@@ -4,13 +4,17 @@ import jwt from 'jsonwebtoken'
 import { pool } from '../db.js'
 import { verifierEcole } from '../middleware/auth-ecole.js'
 import { limiteEssais } from '../middleware/limite-essais.js'
+import { limiteCalculsMotDePasse } from '../middleware/limite-simultanes.js'
 
 const router = Router()
 
 // Côté ÉCOLE : connexion avec code établissement + mot de passe.
 // Limite d'essais ratés par adresse IP : les mots de passe d'école ne peuvent plus être devinés
 // par force brute.
-router.post('/ecole/login', limiteEssais({ max: 15 }), async (req, res) => {
+// Trois freins : au plus 6 calculs de mot de passe en même temps sur tout le serveur, 15 échecs par adresse IP,
+// et 20 échecs par code d'établissement (un robot qui change d'adresse ne peut plus s'acharner sur une école).
+const limiteParCode = limiteEssais({ max: 20, cle: (req) => `ecole-login:${String(req.body?.code || '').trim().toUpperCase().slice(0, 30)}` })
+router.post('/ecole/login', limiteCalculsMotDePasse, limiteEssais({ max: 15 }), limiteParCode, async (req, res) => {
   const { code, motDePasse } = req.body
   if (!code || !motDePasse) {
     return res.status(400).json({ erreur: 'Code établissement et mot de passe requis.' })

@@ -5,6 +5,7 @@ import { randomInt } from 'node:crypto'
 import { verifierAdmin } from '../middleware/auth-admin.js'
 import { verifierEcole } from '../middleware/auth-ecole.js'
 import { limiteEssais } from '../middleware/limite-essais.js'
+import { limiteRequetes } from '../middleware/limite-requetes.js'
 import { anneeActive } from '../annee.js'
 
 const router = Router()
@@ -29,14 +30,17 @@ router.get('/', verifierAdmin, async (req, res) => {
 
 // Liste des écoles actives — utilisée par l'écran "Choisissez votre établissement" côté Parent.
 // Le code établissement n'est JAMAIS renvoyé ici : c'est un secret que seule l'école communique aux parents.
-router.get('/actives', async (req, res) => {
+// Routes publiques (sans connexion) : plafonnées à 120 requêtes par minute et par adresse IP.
+const limitePublic = limiteRequetes({ max: 120 })
+
+router.get('/actives', limitePublic, async (req, res) => {
   const [ecoles] = await pool.query('SELECT id, nom, ville FROM ecoles WHERE actif = TRUE ORDER BY nom')
   res.json(ecoles)
 })
 
 // Vérification du code établissement saisi par un parent. Le code est comparé côté serveur ;
 // les échecs répétés sont limités par adresse IP (voir middleware/limite-essais.js).
-router.post('/:id/verifier-code', limiteEssais(), async (req, res) => {
+router.post('/:id/verifier-code', limitePublic, limiteEssais(), async (req, res) => {
   const code = String(req.body?.code || '').trim().toUpperCase()
   if (!code) return res.status(400).json({ erreur: 'Code établissement requis.' })
   const [rows] = await pool.query('SELECT id FROM ecoles WHERE id = ? AND code = ? AND actif = TRUE', [req.params.id, code])
@@ -45,7 +49,7 @@ router.post('/:id/verifier-code', limiteEssais(), async (req, res) => {
 })
 
 // Classes d'un établissement (utilisées côté Parent pour la sélection de classe)
-router.get('/:id/classes', async (req, res) => {
+router.get('/:id/classes', limitePublic, async (req, res) => {
   const [classes] = await pool.query(
     'SELECT id, nom, ordre, frais_fcfa FROM classes WHERE ecole_id = ? ORDER BY ordre',
     [req.params.id]
